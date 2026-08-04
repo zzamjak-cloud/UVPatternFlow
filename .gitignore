@@ -1,6 +1,20 @@
-# macOS
-.DS_Store
+# Unity 생성 폴더
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]serSettings/
 
-# JetBrains / VS Code
+# IDE
 .idea/
 .vscode/
+*.csproj
+*.sln
+*.suo
+*.user
+*.userprefs
+
+# macOS
+.DS_Store
