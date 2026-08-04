@@ -1,0 +1,25 @@
+{
+  "name": "com.zzamjak.uvpatternflow",
+  "displayName": "UVPatternFlow",
+  "version": "1.0.0",
+  "unity": "6000.0",
+  "description": "패턴 텍스처 UV 스크롤/회전 효과(UVPatternFlow, RawImage/SpriteRenderer 양용)와 스프라이트 시트 기반 그리드 플로우 효과(UVSheetGridFlow, RawImage 전용)를 제공하는 모바일 최적화 UI 이펙트 패키지입니다.",
+  "documentationUrl": "https://github.com/zzamjak-cloud/UVPatternFlow",
+  "changelogUrl": "https://github.com/zzamjak-cloud/UVPatternFlow/blob/main/CHANGELOG.md",
+  "license": "MIT",
+  "author": {
+    "name": "zzamjak",
+    "url": "https://github.com/zzamjak-cloud"
+  },
+  "dependencies": {
+    "com.unity.ugui": "2.0.0"
+  },
+  "keywords": [
+    "UV",
+    "Pattern",
+    "Scroll",
+    "Flow",
+    "Effect",
+    "UI"
+  ]
+}
