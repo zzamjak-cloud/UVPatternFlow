@@ -18,3 +18,9 @@
 
 # macOS
 .DS_Store
+
+# Mono 크래시 덤프
+mono_crash.*
+
+# OMC 작업 상태 (커밋 금지)
+.omc/

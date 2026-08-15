@@ -80,29 +80,70 @@ namespace CAT.Effects
         private void DrawWarnings(UVSheetGridFlow flow)
         {
             var rawImage = flow.GetComponent<RawImage>();
-            if (rawImage == null) return;
+            var image = rawImage != null ? null : flow.GetComponent<Image>();
 
-            if (rawImage.texture == null)
+            if (rawImage == null && image == null)
+            {
+                EditorGUILayout.HelpBox(
+                    "RawImage 또는 Image 컴포넌트가 필요합니다.",
+                    MessageType.Warning);
+                return;
+            }
+
+            EditorGUILayout.LabelField("모드", rawImage != null ? "UI (RawImage)" : "UI (Image)");
+
+            if (rawImage != null && rawImage.texture == null)
             {
                 EditorGUILayout.HelpBox(
                     "RawImage 의 Texture 에 스프라이트 시트를 지정하세요.",
                     MessageType.Warning);
             }
-
-            // 마스크 병용 경고 (전용 셰이더는 클리핑/스텐실 미지원)
-            if (flow.GetComponentInParent<Mask>() != null || flow.GetComponentInParent<RectMask2D>() != null)
+            if (image != null && image.sprite == null)
             {
                 EditorGUILayout.HelpBox(
-                    "UVSheetGridFlow 셰이더는 Mask / RectMask2D / SoftMask 계열을 지원하지 않습니다. 마스크 밖에서 사용하세요.",
+                    "Image 의 Source Image 에 스프라이트 시트를 지정하세요.",
                     MessageType.Warning);
             }
 
-            Rect uvRect = rawImage.uvRect;
-            if (uvRect != new Rect(0f, 0f, 1f, 1f))
+            if (rawImage != null && rawImage.uvRect != new Rect(0f, 0f, 1f, 1f))
             {
                 EditorGUILayout.HelpBox(
                     "RawImage 의 UV Rect 는 기본값(0,0,1,1)을 권장합니다. 그리드/스크롤은 이 컴포넌트가 제어합니다.",
                     MessageType.Info);
+            }
+
+            // Image 모드 전용 검사
+            if (image != null)
+            {
+                if (image.type != Image.Type.Simple)
+                {
+                    EditorGUILayout.HelpBox(
+                        "Image Type = Simple 이어야 합니다. Sliced/Tiled/Filled 는 패치별 UV 로 인해 그리드가 의도대로 표시되지 않습니다.",
+                        MessageType.Warning);
+                }
+                if (image.useSpriteMesh)
+                {
+                    EditorGUILayout.HelpBox(
+                        "Use Sprite Mesh 가 켜져 있으면 알파 외곽선 메시가 그리드를 마스킹합니다. 옵션을 끄세요.",
+                        MessageType.Warning);
+                }
+
+                Sprite sprite = image.sprite;
+                if (sprite != null && sprite.packed)
+                {
+                    if (sprite.packingMode != SpritePackingMode.Rectangle)
+                    {
+                        EditorGUILayout.HelpBox(
+                            "아틀라스가 Tight Packing 이면 이웃 스프라이트가 시트 영역을 침범합니다. SpriteAtlas 의 Tight Packing 을 끄세요.",
+                            MessageType.Warning);
+                    }
+                    if (sprite.packingRotation != SpritePackingRotation.None)
+                    {
+                        EditorGUILayout.HelpBox(
+                            "아틀라스에서 회전 패킹된 스프라이트는 UV 방향이 달라져 사용할 수 없습니다. SpriteAtlas 의 Allow Rotation 을 끄세요.",
+                            MessageType.Warning);
+                    }
+                }
             }
         }
 

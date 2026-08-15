@@ -4,11 +4,15 @@ using UnityEngine.UI;
 namespace CAT.Effects
 {
     /// <summary>
-    /// 패턴 텍스처 UV를 스크롤/회전시키는 컴포넌트 (RawImage / SpriteRenderer 양용).
+    /// 패턴 텍스처 UV를 스크롤/회전시키는 컴포넌트 (RawImage / Image / SpriteRenderer 겸용).
     ///
     /// [모드 자동 감지]
-    /// - RawImage 존재 → UI 모드: IMeshModifier 로 메시 UV 를 직접 변환.
+    /// - RawImage 존재 → RawImage 모드: IMeshModifier 로 메시 UV(uv0) 를 직접 변환.
     ///   Material 을 건드리지 않으므로 SoftMask / SoftMaskLight 와 자동 호환된다.
+    /// - Image 존재 → Image 모드: IMeshModifier 로 uv1(패턴 UV)/uv2(외곽 UV Rect) 채널에 데이터를 싣고,
+    ///   전용 UI 셰이더(CAT/Effects/UVPatternFlow (UI))가 프래그먼트에서 frac() 으로 서브영역 내 반복 샘플링.
+    ///   → 아틀라스에 포함된 스프라이트도 동작, Wrap Mode 무관. Canvas 의
+    ///   Additional Shader Channels(TexCoord1/2) 는 자동 활성화된다. UGUI Mask/RectMask2D 호환.
     /// - SpriteRenderer 존재 → Sprite 모드: 전용 셰이더(CAT/Effects/UVPatternFlow (Sprite)) +
     ///   MaterialPropertyBlock 으로 UV 변환. 공유 material 1개를 모든 인스턴스가 사용.
     ///
@@ -16,9 +20,16 @@ namespace CAT.Effects
     /// 회전(피벗 0.5,0.5, aspect 보정) → 타일링(UV Rect W/H) → 오프셋(UV Rect X/Y + 스크롤)
     /// 스크롤은 회전된 패턴 축을 따라 흐른다.
     ///
+    /// [성능]
+    /// - UI 모드는 스크롤/회전 중 매 프레임 메시를 갱신한다. 다른 UI 와 같은 Canvas 에 있으면
+    ///   전체 배칭이 매 프레임 재계산되므로 전용 하위 Canvas 분리 필수 (부착 시 자동 추가됨).
+    /// - Sprite 모드는 MaterialPropertyBlock 사용으로 인스턴스별 드로우콜이 된다 (다수 배치 시 주의).
+    ///
     /// [제약]
-    /// - 텍스처 Wrap Mode = Repeat 필수
-    /// - UI 모드: RawImage 의 uvRect 는 (0,0,1,1) 로 두고 이 컴포넌트의 UV Rect 를 사용 권장
+    /// - RawImage/Sprite 모드: 텍스처 Wrap Mode = Repeat 필수
+    /// - RawImage 모드: RawImage 의 uvRect 는 (0,0,1,1) 로 두고 이 컴포넌트의 UV Rect 를 사용 권장
+    /// - Image 모드: Image Type = Simple + Use Sprite Mesh OFF 필수.
+    ///   아틀라스는 Tight Packing / Rotation 비활성 필요. 밉맵 사용 시 반복 경계에 미세한 심이 보일 수 있음.
     /// - Sprite 모드: 아틀라스 불가, Mesh Type = Full Rect, Draw Mode = Simple 권장
     /// </summary>
     [AddComponentMenu("CAT/Effects/UVPatternFlow")]
@@ -49,6 +60,10 @@ namespace CAT.Effects
         // Sprite 모드: 공유 material 로 교체하기 전의 원본 material (비활성화 시 복구용, 씬에 직렬화)
         [SerializeField, HideInInspector]
         private Material _spriteOriginalMaterial;
+
+        // Image 모드: 공유 material 로 교체하기 전의 원본 material (기본 material 이었다면 null)
+        [SerializeField, HideInInspector]
+        private Material _imageOriginalMaterial;
 
         #endregion
 
@@ -98,9 +113,14 @@ namespace CAT.Effects
         #region 내부 상태
 
         private RawImage _rawImage;
+        private Image _image;
         private SpriteRenderer _spriteRenderer;
         private bool _isUIMode;
         private MaterialPropertyBlock _mpb;
+
+        private bool _canvasChannelsEnsured; // Image 모드: Canvas 채널 활성화 완료 여부
+        private Sprite _outerUVSprite;       // Image 모드: 외곽 UV 캐시 기준 스프라이트
+        private Vector4 _outerUVRect = new Vector4(0f, 0f, 1f, 1f); // (min.xy, size.zw)
 
         private Vector2 _offset;     // 스크롤 누적 오프셋
         private float _animAngle;    // 회전 속도 누적 각도 (도)
@@ -110,9 +130,15 @@ namespace CAT.Effects
         private static Material s_spriteSharedMaterial;
         private const string SpriteMaterialResourceName = "UVPatternFlowSprite";
 
+        // Image 모드 공유 material (개별 값은 정점 채널 uv1/uv2 로 주입 → 인스턴스 불필요)
+        private static Material s_imageSharedMaterial;
+        private static bool s_imageMaterialErrorLogged; // 재시도 중 에러 로그 중복 방지
+        private const string ImageMaterialResourceName = "UVPatternFlowUI";
+
         private static readonly int PropRendererColor = Shader.PropertyToID("_RendererColor");
         private static readonly int PropUVFlowMat = Shader.PropertyToID("_UVFlowMat");
         private static readonly int PropUVFlowST = Shader.PropertyToID("_UVFlowST");
+        private static readonly int PropUVFlowUI = Shader.PropertyToID("_UVFlowUI");
 
         #endregion
 
@@ -170,6 +196,7 @@ namespace CAT.Effects
 
         private void OnEnable()
         {
+            _canvasChannelsEnsured = false;
             CacheTargets();
             _offset = Vector2.zero;
             _animAngle = 0f;
@@ -182,8 +209,10 @@ namespace CAT.Effects
         private void OnDisable()
         {
             RestoreSpriteMaterial();
+            RestoreImageMaterial();
             // UI 모드: 비활성화 시 원래 UV 로 복원되도록 리빌드 트리거
             if (_rawImage != null) _rawImage.SetVerticesDirty();
+            if (_image != null) _image.SetVerticesDirty();
         }
 
         private void Update()
@@ -209,15 +238,29 @@ namespace CAT.Effects
         }
 
 #if UNITY_EDITOR
+        /// <summary>
+        /// 에디터에서 컴포넌트 부착/리셋 시 1회 호출.
+        /// UI 모드는 스크롤 중 매 프레임 메시를 갱신하므로, 부모 Canvas 전체의 배칭 재계산을
+        /// 막기 위해 전용 하위 Canvas 를 자동 부착한다 (안전장치).
+        /// </summary>
+        private void Reset()
+        {
+            bool isUI = GetComponent<RawImage>() != null || GetComponent<Image>() != null;
+            if (isUI && GetComponent<Canvas>() == null && GetComponentInParent<Canvas>() != null)
+                UnityEditor.Undo.AddComponent<Canvas>(gameObject);
+        }
+
         private void OnValidate()
         {
-            if (Application.isPlaying) return;
             // OnValidate 중 material 교체/SetVerticesDirty 는 경고 발생 → delayCall 로 지연
+            // 플레이 모드에서도 실행해야 인스펙터 변경(UV Rect 등)이 즉시 반영된다
             UnityEditor.EditorApplication.delayCall += () =>
             {
                 if (this == null) return;
                 CacheTargets();
                 ApplyToTarget();
+                if (!Application.isPlaying)
+                    UnityEditor.SceneView.RepaintAll();
             };
         }
 #endif
@@ -229,10 +272,13 @@ namespace CAT.Effects
         private void CacheTargets()
         {
             _rawImage = GetComponent<RawImage>();
-            _isUIMode = _rawImage != null;
+            _image = _rawImage != null ? null : GetComponent<Image>();
+            _isUIMode = _rawImage != null || _image != null;
             _spriteRenderer = _isUIMode ? null : GetComponent<SpriteRenderer>();
 
-            if (!_isUIMode && _spriteRenderer != null && isActiveAndEnabled)
+            if (_image != null && isActiveAndEnabled)
+                EnsureImageMaterial();
+            if (_spriteRenderer != null && isActiveAndEnabled)
                 EnsureSpriteMaterial();
         }
 
@@ -268,6 +314,63 @@ namespace CAT.Effects
                 _spriteRenderer.sharedMaterial = _spriteOriginalMaterial;
         }
 
+        /// <summary>
+        /// Image 모드: Image 의 material 을 공유 UVPatternFlow UI material 로 교체한다.
+        /// 기본 UI 셰이더는 uv1/uv2 채널을 사용하지 않으므로 전용 셰이더가 필요.
+        /// 사용자가 호환 프로퍼티(_UVFlowUI)를 가진 커스텀 material 을 지정했으면 그대로 사용.
+        /// </summary>
+        private void EnsureImageMaterial()
+        {
+            EnsureCanvasChannels();
+
+            Material cur = _image.material;
+            if (cur != null && cur.HasProperty(PropUVFlowUI)) return;
+
+            if (s_imageSharedMaterial == null)
+            {
+                s_imageSharedMaterial = Resources.Load<Material>(ImageMaterialResourceName);
+                if (s_imageSharedMaterial == null)
+                {
+                    // 에셋 임포트가 도메인 리로드보다 늦을 수 있음 → ApplyToTarget 에서 재시도되므로 로그는 1회만
+                    if (!s_imageMaterialErrorLogged)
+                    {
+                        s_imageMaterialErrorLogged = true;
+                        Debug.LogError("[UVPatternFlow] Resources 에서 UVPatternFlowUI.mat 을 찾을 수 없습니다. Image 모드가 동작하지 않습니다.");
+                    }
+                    return;
+                }
+            }
+
+            // 기본 material 이었다면 null 로 백업 (null 재할당 = 기본 material 복귀)
+            if (_imageOriginalMaterial == null && cur != _image.defaultMaterial)
+                _imageOriginalMaterial = cur;
+            _image.material = s_imageSharedMaterial;
+        }
+
+        /// <summary>Image 모드: 비활성화 시 원본 material 복구</summary>
+        private void RestoreImageMaterial()
+        {
+            if (_image == null) return;
+            if (_image.material == s_imageSharedMaterial)
+                _image.material = _imageOriginalMaterial;
+        }
+
+        /// <summary>
+        /// Image 모드: 셰이더가 uv1(패턴 UV)/uv2(외곽 UV Rect) 를 받도록
+        /// Canvas 의 Additional Shader Channels 를 자동 활성화한다.
+        /// </summary>
+        private void EnsureCanvasChannels()
+        {
+            Canvas canvas = _image.canvas;
+            if (canvas == null) return;
+
+            const AdditionalCanvasShaderChannels required =
+                AdditionalCanvasShaderChannels.TexCoord1 | AdditionalCanvasShaderChannels.TexCoord2;
+            if ((canvas.additionalShaderChannels & required) != required)
+                canvas.additionalShaderChannels |= required;
+            _canvasChannelsEnsured = true;
+        }
+
         #endregion
 
         #region UV 변환 적용
@@ -278,6 +381,13 @@ namespace CAT.Effects
             {
                 // 메시 리빌드 트리거 → ModifyMesh 에서 현재 상태로 UV 변환
                 if (_rawImage != null) _rawImage.SetVerticesDirty();
+                else if (_image != null)
+                {
+                    // 캔버스 초기화/에셋 임포트가 늦을 수 있으므로 성공할 때까지 재시도
+                    if (!_canvasChannelsEnsured) EnsureCanvasChannels();
+                    if (s_imageSharedMaterial == null) EnsureImageMaterial();
+                    _image.SetVerticesDirty();
+                }
             }
             else if (_spriteRenderer != null)
             {
@@ -322,7 +432,8 @@ namespace CAT.Effects
         {
             if (_isUIMode)
             {
-                Rect r = _rawImage.rectTransform.rect;
+                RectTransform rt = _rawImage != null ? _rawImage.rectTransform : _image.rectTransform;
+                Rect r = rt.rect;
                 return r.height > 0.0001f ? r.width / r.height : 1f;
             }
 
@@ -356,8 +467,10 @@ namespace CAT.Effects
         public void ModifyMesh(Mesh mesh) { }
 
         /// <summary>
-        /// UI 모드: RawImage 메시의 UV 를 직접 변환한다 (회전 → 타일링 → 오프셋).
-        /// Material 을 건드리지 않으므로 SoftMask / SoftMaskLight 체인과 자동 호환.
+        /// UI 모드: 메시 UV 를 변환한다 (회전 → 타일링 → 오프셋).
+        /// - RawImage: uv0 직접 변환. Material 을 건드리지 않으므로 SoftMask 체인과 자동 호환.
+        /// - Image: uv1 에 변환된 패턴 UV, uv2 에 스프라이트 외곽 UV Rect 를 실어
+        ///   전용 UI 셰이더가 프래그먼트에서 서브영역 내 반복 샘플링 (아틀라스 지원).
         /// </summary>
         public void ModifyMesh(VertexHelper vh)
         {
@@ -371,17 +484,58 @@ namespace CAT.Effects
             float offY = _uvRect.y + _offset.y;
 
             UIVertex vert = default;
+
+            if (_rawImage != null)
+            {
+                for (int i = 0; i < count; i++)
+                {
+                    vh.PopulateUIVertex(ref vert, i);
+                    float px = vert.uv0.x - 0.5f;
+                    float py = vert.uv0.y - 0.5f;
+                    float rx = m.x * px + m.y * py + 0.5f;
+                    float ry = m.z * px + m.w * py + 0.5f;
+                    vert.uv0 = new Vector4(
+                        rx * _uvRect.width + offX,
+                        ry * _uvRect.height + offY,
+                        vert.uv0.z, vert.uv0.w);
+                    vh.SetUIVertex(vert, i);
+                }
+                return;
+            }
+
+            // Image 모드: 패턴 좌표는 정점 위치(rect 내 0~1)에서 계산 → 스프라이트 UV 레이아웃과 무관
+            Rect rect = _image.rectTransform.rect;
+            float invW = rect.width  > 0.0001f ? 1f / rect.width  : 0f;
+            float invH = rect.height > 0.0001f ? 1f / rect.height : 0f;
+
+            // 스프라이트의 아틀라스 내 외곽 UV (독립 텍스처면 0,0~1,1). 스프라이트 변경 시에만 재계산
+            Sprite sprite = _image.sprite;
+            if (sprite != _outerUVSprite)
+            {
+                _outerUVSprite = sprite;
+                if (sprite != null)
+                {
+                    Vector4 o = UnityEngine.Sprites.DataUtility.GetOuterUV(sprite);
+                    _outerUVRect = new Vector4(o.x, o.y, o.z - o.x, o.w - o.y);
+                }
+                else
+                {
+                    _outerUVRect = new Vector4(0f, 0f, 1f, 1f);
+                }
+            }
+            Vector4 outerRect = _outerUVRect;
+
             for (int i = 0; i < count; i++)
             {
                 vh.PopulateUIVertex(ref vert, i);
-                float px = vert.uv0.x - 0.5f;
-                float py = vert.uv0.y - 0.5f;
+                float px = (vert.position.x - rect.xMin) * invW - 0.5f;
+                float py = (vert.position.y - rect.yMin) * invH - 0.5f;
                 float rx = m.x * px + m.y * py + 0.5f;
                 float ry = m.z * px + m.w * py + 0.5f;
-                vert.uv0 = new Vector4(
+                vert.uv1 = new Vector4(
                     rx * _uvRect.width + offX,
-                    ry * _uvRect.height + offY,
-                    vert.uv0.z, vert.uv0.w);
+                    ry * _uvRect.height + offY, 0f, 0f);
+                vert.uv2 = outerRect;
                 vh.SetUIVertex(vert, i);
             }
         }

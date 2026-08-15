@@ -41,8 +41,8 @@ https://github.com/zzamjak-cloud/UVPatternFlow.git?path=/Packages/com.zzamjak.uv
 
 | 컴포넌트 | 대상 | 설명 |
 |----------|------|------|
-| `UVPatternFlow` | RawImage / SpriteRenderer | 패턴 텍스처 UV 스크롤 + 회전 |
-| `UVSheetGridFlow` | RawImage 전용 | 스프라이트 시트 기반 그리드 셀 랜덤 스위칭 + 무한 스크롤 |
+| `UVPatternFlow` | RawImage / Image / SpriteRenderer | 패턴 텍스처 UV 스크롤 + 회전 |
+| `UVSheetGridFlow` | RawImage / Image | 스프라이트 시트 기반 그리드 셀 랜덤 스위칭 + 무한 스크롤 |
 
 두 컴포넌트 모두 `AddComponentMenu`: **CAT/Effects/** 하위에 등록되며, 네임스페이스는 `CAT.Effects` 입니다.
 
@@ -54,13 +54,14 @@ https://github.com/zzamjak-cloud/UVPatternFlow.git?path=/Packages/com.zzamjak.uv
 
 ### 모드 자동 감지
 
-- **UI 모드 (RawImage)**: `IMeshModifier` 로 메시 UV를 직접 변환합니다. Material을 건드리지 않으므로 **SoftMask / SoftMaskLight와 자동 호환**됩니다.
+- **RawImage 모드**: `IMeshModifier` 로 메시 UV를 직접 변환합니다. Material을 건드리지 않으므로 **SoftMask / SoftMaskLight와 자동 호환**됩니다.
+- **Image 모드**: `IMeshModifier` 로 uv1/uv2 채널에 패턴 UV와 스프라이트 외곽 UV Rect를 싣고, 전용 UI 셰이더(`CAT/Effects/UVPatternFlow (UI)`)가 프래그먼트에서 서브영역 내 반복 샘플링합니다. **스프라이트 아틀라스에 포함된 스프라이트도 지원**하며 Wrap Mode 설정이 필요 없습니다. Canvas의 Additional Shader Channels(TexCoord1/2)는 자동 활성화됩니다. UGUI Mask / RectMask2D와 호환됩니다.
 - **Sprite 모드 (SpriteRenderer)**: 전용 셰이더(`CAT/Effects/UVPatternFlow (Sprite)`) + `MaterialPropertyBlock` 으로 UV를 변환합니다. 공유 Material 1개를 모든 인스턴스가 사용하므로 배칭이 유지됩니다.
 
 ### 기본 사용
 
-1. `RawImage` 또는 `SpriteRenderer` 가 있는 GameObject에 `UVPatternFlow` 컴포넌트를 추가합니다.
-2. 텍스처의 **Wrap Mode를 Repeat** 로 설정합니다.
+1. `RawImage`, `Image` 또는 `SpriteRenderer` 가 있는 GameObject에 `UVPatternFlow` 컴포넌트를 추가합니다.
+2. 텍스처의 **Wrap Mode를 Repeat** 로 설정합니다. (Image 모드는 불필요)
 3. 인스펙터에서 `Scroll Speed`, `UV Rect`, `Rotation` 등을 조정합니다.
 4. `Play On Enable` 이 켜져 있으면 활성화 시 자동 재생됩니다.
 
@@ -96,9 +97,10 @@ flow.UVRect = new Rect(0f, 0f, 3f, 3f);   // 3×3 타일링
 
 ### 제약 사항
 
-- 텍스처 **Wrap Mode = Repeat** 필수
-- UI 모드: `RawImage.uvRect` 는 기본값 `(0,0,1,1)` 로 두고 이 컴포넌트의 `UV Rect` 사용 권장
-- Sprite 모드: 스프라이트 아틀라스 불가, **Mesh Type = Full Rect**, **Draw Mode = Simple** 권장
+- RawImage/Sprite 모드: 텍스처 **Wrap Mode = Repeat** 필수
+- RawImage 모드: `RawImage.uvRect` 는 기본값 `(0,0,1,1)` 로 두고 이 컴포넌트의 `UV Rect` 사용 권장
+- Image 모드: **Image Type = Simple**, **Use Sprite Mesh OFF** 필수. 아틀라스 사용 시 SpriteAtlas의 **Tight Packing / Allow Rotation 을 꺼야** 합니다. 밉맵 텍스처는 반복 경계에 미세한 심(seam)이 보일 수 있습니다.
+- Sprite 모드: 스프라이트 아틀라스 불가 (아틀라스가 필요하면 Image 모드 사용), **Mesh Type = Full Rect**, **Draw Mode = Simple** 권장
 
 ---
 
@@ -108,8 +110,8 @@ flow.UVRect = new Rect(0f, 0f, 3f, 3f);   // 3×3 타일링
 
 ### 기본 사용
 
-1. `RawImage` 가 있는 GameObject에 `UVSheetGridFlow` 컴포넌트를 추가합니다.
-2. `RawImage.texture` 에 스프라이트 시트 텍스처를 지정합니다.
+1. `RawImage` 또는 `Image` 가 있는 GameObject에 `UVSheetGridFlow` 컴포넌트를 추가합니다.
+2. `RawImage.texture`(또는 `Image.sprite`) 에 스프라이트 시트를 지정합니다. Image 모드는 **스프라이트 아틀라스에 포함된 시트도 지원**합니다.
 3. `Sheet Tiles` 를 시트 분할 수(예: 3×3)에 맞게 설정합니다.
 4. `Grid Count`, `Cell Gap`, `Scroll Speed`, `Switch Duration` 을 조정합니다.
 
@@ -145,20 +147,27 @@ gridFlow.SwitchDuration = 1f;                   // 1초마다 프레임 스위�
 
 ### 제약 사항
 
-- **RawImage 전용** (`RequireComponent`)
-- Mask / RectMask2D / SoftMask 계열 **미대응** (전용 셰이더에 클리핑/스텐실 없음)
-- 시트는 독립 텍스처 사용 (Wrap Mode 무관 — 셰이더 내부 frac 처리)
-- `RawImage.uvRect` 는 기본값 `(0,0,1,1)` 권장
+- UGUI **Mask / RectMask2D 호환**. SoftMask 계열은 미대응 (전용 셰이더 변형 필요)
+- Wrap Mode 무관 (셰이더 내부 frac 처리)
+- RawImage 모드: `uvRect` 는 기본값 `(0,0,1,1)` 권장
+- Image 모드: **Image Type = Simple**, **Use Sprite Mesh OFF** 필수. 아틀라스 사용 시 SpriteAtlas의 **Tight Packing / Allow Rotation 을 꺼야** 합니다.
 
 ---
 
 ## 모바일 최적화 설계
 
 - **UVPatternFlow (UI 모드)**: 메시 UV 직접 변환 — Material 인스턴스 생성 없음, 마스크 체인 호환
-- **UVPatternFlow (Sprite 모드)**: 공유 Material 1개 + `MaterialPropertyBlock` — 배칭 유지, per-instance 할당 없음
+- **UVPatternFlow (Sprite 모드)**: 공유 Material 1개 + `MaterialPropertyBlock` — per-instance 할당 없음
 - **UVSheetGridFlow**: 셀 분할/간격/프레임 선택을 전부 프래그먼트 셰이더에서 처리 — 쿼드 1개, Canvas rebuild 없음
-- 셰이더는 `half` precision 우선, 분기 없는 수학 연산 사용
+- 셰이더는 `half` precision 우선, 분기 없는 수학 연산, sin-free 해시(모바일 GPU 정밀도 안전) 사용
 - `Shader.PropertyToID` static 캐싱, 오프셋/각도 래핑으로 부동소수점 정밀도 유지
+- 런타임 핫패스(Update/ModifyMesh)에 GC 할당 없음
+
+## 모바일 성능 가이드 (사용 시 주의)
+
+- **UVPatternFlow UI 모드는 전용 하위 Canvas 로 분리하세요.** 스크롤/회전 중 매 프레임 메시를 갱신하므로, UI 가 많은 Canvas 에 같이 두면 전체 배칭이 매 프레임 재계산됩니다. 컴포넌트 부착 시 전용 Canvas 가 자동 추가되며, 기존 오브젝트는 인스펙터의 "전용 Canvas 추가" 버튼을 사용하세요. (UVSheetGridFlow 는 material 프로퍼티 방식이라 해당 없음)
+- **Sprite 모드는 인스턴스별 드로우콜입니다.** `MaterialPropertyBlock` 특성상 배칭이 깨지므로 수십 개 이상 대량 배치에는 부적합합니다.
+- **풀스크린 배경으로 쓸 때는 오버드로우를 감안하세요.** 투명 블렌드 풀스크린 1패스입니다. 배경이 항상 화면을 가리면 배경 뒤 요소를 비활성화하는 것이 좋습니다.
 
 ## 라이선스
 

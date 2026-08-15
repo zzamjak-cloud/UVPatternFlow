@@ -7,7 +7,7 @@
 ## 설치 (Unity Package Manager → Install package from git URL)
 
 ```
-https://github.com/zzamjak-cloud/UVPatternFlow.git?path=/Packages/com.zzamjak.uvpatternflow#v1.0.0
+https://github.com/zzamjak-cloud/UVPatternFlow.git?path=/Packages/com.zzamjak.uvpatternflow#v1.1.0
 ```
 
 ## 문서
