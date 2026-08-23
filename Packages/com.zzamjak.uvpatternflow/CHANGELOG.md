@@ -5,6 +5,14 @@
 포맷은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)를 따르며,
 버전은 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
 
+## [1.1.1] - 2026-08-23
+
+### Changed
+
+- 라이선스를 MIT에서 GNU General Public License v3.0으로 변경했습니다.
+- 패키지 메타데이터의 라이선스 식별자를 `GPL-3.0-only`로 갱신했습니다.
+- README에 저작권자와 GPLv3 배포 조건을 명확히 기재했습니다.
+
 ## [1.1.0] - 2026-08-15
 
 ### Added
