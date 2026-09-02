@@ -1,6 +1,6 @@
 {
     "name": "CAT.UVPatternFlow",
-    "rootNamespace": "",
+    "rootNamespace": "CAT.UVPatternFlow",
     "references": [
         "UnityEngine.UI"
     ],
