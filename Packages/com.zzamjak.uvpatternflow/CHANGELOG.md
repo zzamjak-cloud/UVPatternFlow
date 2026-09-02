@@ -5,6 +5,13 @@
 포맷은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)를 따르며,
 버전은 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
 
+## [1.1.2] - 2026-09-02
+
+### Fixed
+
+- `changelogUrl`이 존재하지 않는 레포 루트 `CHANGELOG.md`를 가리켜 Package Manager의 Changelog 링크가 404가 되던 문제를 수정했습니다. 패키지 폴더 안의 실제 경로로 교정했습니다.
+- `licensesUrl`이 없어 Package Manager에 라이선스 링크가 표시되지 않던 문제를 수정했습니다.
+
 ## [1.1.1] - 2026-08-23
 
 ### Changed
