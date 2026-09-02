@@ -187,15 +187,6 @@
         "com.unity.modules.imgui": "1.0.0"
       }
     },
-    "com.zzamjak.cateditor": {
-      "version": "https://github.com/zzamjak-cloud/CATEditor.git?path=/Packages/com.zzamjak.cateditor#v1.0.0",
-      "depth": 0,
-      "source": "git",
-      "dependencies": {
-        "com.unity.ugui": "2.0.0"
-      },
-      "hash": "0769b1eb99878cb0b0732c608d76ff3897b4efb3"
-    },
     "com.zzamjak.uvpatternflow": {
       "version": "file:com.zzamjak.uvpatternflow",
       "depth": 0,
